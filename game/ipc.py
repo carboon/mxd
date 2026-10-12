@@ -14,6 +14,20 @@ import numpy as np
 FRAME_SHM = "mxd_frame"
 INPUT_SHM = "mxd_input"
 
+
+def _detach_unlink_guard(shm):
+    """从 resource_tracker 注销本进程对共享段的登记。
+
+    否则本进程退出时 tracker 会把(游戏还持有的)共享段 unlink 掉,
+    造成后续进程 attach 到新建的孤儿段、互相看不见数据的幽灵态。"""
+    try:
+        from multiprocessing import resource_tracker
+        name = getattr(shm, "_name", None)
+        if name:
+            resource_tracker.unregister(name)
+    except Exception:
+        pass
+
 KEY_L, KEY_R, KEY_U, KEY_D = 1, 2, 4, 8
 EDGE_ATTACK, EDGE_JUMP, EDGE_SKILL = 1, 2, 4
 
@@ -70,6 +84,7 @@ class FrameReader:
     def __init__(self):
         from multiprocessing import shared_memory
         self.shm = shared_memory.SharedMemory(name=FRAME_SHM)
+        _detach_unlink_guard(self.shm)
         self.buf = memoryview(self.shm.buf)
         self.last_seq = 0
         w, h = struct.unpack_from("<HH", self.buf, 8)
@@ -136,14 +151,16 @@ class RemoteInputServer:
 
 
 class RemoteInputClient:
-    """bot端：写虚拟键盘。"""
+    """bot端：写虚拟键盘。只 attach 游戏创建的段(缺失=游戏未启动, 快速报错);
+    从 resource_tracker 注销, 防止 bot 进程退出时把共享段顺带 unlink。"""
 
     def __init__(self):
         from multiprocessing import shared_memory
         try:
-            self.shm = shared_memory.SharedMemory(name=INPUT_SHM, create=True, size=16)
-        except FileExistsError:
             self.shm = shared_memory.SharedMemory(name=INPUT_SHM)
+        except FileNotFoundError:
+            raise RuntimeError("共享键盘不存在: 游戏进程未启动或已退出")
+        _detach_unlink_guard(self.shm)
         self.buf = memoryview(self.shm.buf)
         self.seq = 0
 

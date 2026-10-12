@@ -31,6 +31,7 @@ class Player:
         self.fh_id = None                    # 当前所在foothold id
         self.drop_fh = None                  # 下跳穿透的foothold id
         self.drop_t = 0.0
+        self._last_safe = (0.0, 305.0)       # 坠Map自救锚点(最后落脚点)
         self.hp = C.PLAYER_HP
         self.mp = C.PLAYER_MP
         self.no_dmg_t = 0.0
@@ -220,6 +221,13 @@ class Player:
                 self.fh_id = self.world.fh_id_at_y(self.x, self.y)
                 self.drop_t = 0
                 self.drop_fh = None
+                self._last_safe = (self.x, self.y)      # 坠Map自救锚点
+            if self.y > 430:                             # 掉出地图底部 → 回到最后落脚点
+                self.x, self.y = getattr(self, "_last_safe", (0.0, 305.0))
+                self.vy = 0.0
+                self.on_ground = True
+                self.state = "stand"
+                self.kb_t = 0.0
             # 空中抓绳（跳跃中按↑, 上升/下落段均可, 同原版）
             if up and self.climb is None:
                 r = self.world.rope_near(self.x, self.y)

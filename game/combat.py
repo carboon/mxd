@@ -12,6 +12,7 @@ from . import sprites
 class Star:
     def __init__(self, x, y, face):
         self.x = x
+        self.x0 = x            # 出手点: 扇形覆盖随飞行距离扩张
         self.y = y
         self.face = face
         self.dead = False
@@ -20,7 +21,9 @@ class Star:
     def update(self, dt, mobs):
         self.t += dt
         self.x += self.face * C.STAR_SPEED * dt
-        r = pygame.Rect(self.x - 16, self.y - 10, 32, 20)
+        half = min(C.STAR_CONE_NEAR + C.STAR_CONE_SLOPE * abs(self.x - self.x0),
+                   C.STAR_CONE_MAX)
+        r = pygame.Rect(self.x - 16, self.y - half, 32, half * 2)
         for m in mobs:
             if m.state != "die" and r.colliderect(m.rect()):
                 m.take_hit(C.STAR_DAMAGE, self.x - self.face * 40, global_fx)
@@ -45,6 +48,8 @@ class Combat:
         self.stars = []
         self.slash_fx = []                 # (x,y,face,t) 挥砍特效
         self.mobs_getter = mobs_getter
+        self.stars_fired = 0               # 诊断计数
+        self.punches = 0                   # 诊断计数
 
     def slash(self, player):
         self.slash_fx.append([player.x + player.face * 26,
@@ -64,6 +69,7 @@ class Combat:
 
     def punch(self, player, target):
         """挥拳: 近身攻击, 微量伤害且吸引仇恨(怪物受击即进入3.5s仇恨追击)。"""
+        self.punches += 1
         self.slash_fx.append([player.x + player.face * 18,
                               player.y - 34, player.face, 0.0])
         target.take_hit(C.PUNCH_DAMAGE, player.x, global_fx)
@@ -71,6 +77,7 @@ class Combat:
     def throw_star(self, player):
         y = player.y - 38 if player.state != "prone" else player.y - 14
         self.stars.append(Star(player.x + player.face * 18, y, player.face))
+        self.stars_fired += 1
 
     def update(self, dt):
         for s in self.stars:

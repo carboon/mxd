@@ -173,7 +173,13 @@ class Game:
                         json.dump({"x": self.player.x, "y": self.player.y,
                                    "onRope": self.player.climb is not None,
                                    "haste": round(self.player.haste_t, 1),
-                                   "kills": self.session.total_kills}, f)
+                                   "kills": self.session.total_kills,
+                                   "stars": self.combat.stars_fired,
+                                   "punches": self.combat.punches,
+                                   "face": self.player.face,
+                                   "state": self.player.state,
+                                   "kb": round(self.player.kb_t, 2),
+                                   "cd": round(self.player.cooldown, 2)}, f)
                 except Exception:
                     pass
 

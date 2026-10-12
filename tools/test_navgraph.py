@@ -46,8 +46,11 @@ for src in range(len(b.layer_rep)):
             continue
         r = b.plan_route(src, dst)
         if r is None:
-            print("  %d→%d: 无路!" % (src, dst))
-            fail += 1
+            if dst == 0:
+                print("  %d→%d: 无路(预期内: 顶层石台不在巡逻集, 规则6)" % (src, dst))
+            else:
+                print("  %d→%d: 无路!" % (src, dst))
+                fail += 1
         else:
             print("  %d→%d: %s" % (src, dst, " → ".join(h["kind"] for h in r)))
 print("失败数:", fail)

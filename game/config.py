@@ -28,6 +28,10 @@ STAR_DAMAGE = 1000          # 每发飞镖固定伤害（简化规则）
 STAR_COUNT = 2              # 双飞斩一次2发
 STAR_SPEED = 760.0
 STAR_INNER_DELAY = 0.09     # 两发间隔
+# 飞镖扇形覆盖(远端可打中相邻平台的上下目标; 封顶不跨相隔182px的两层)
+STAR_CONE_NEAR = 12         # 近端垂直半高(px)
+STAR_CONE_SLOPE = 0.28      # 垂直半高随飞行距离的扩张斜率
+STAR_CONE_MAX = 130         # 垂直半高封顶(px)
 ATTACK_COOLDOWN = 0.60      # 攻击间隔（动画周期）
 L7_MP_COST = 0              # MP无限模式(需求变更): 双飞斩不耗魔
 PLAYER_MAX_HP, PLAYER_HP = 1822, 1284
