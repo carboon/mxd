@@ -1,0 +1,38 @@
+{
+ "2220100": {
+  "name": "蓝蘑菇",
+  "level": 20,
+  "hp": 350,
+  "exp": 32,
+  "speed": 5,
+  "pad": 90,
+  "castsToKill": 1
+ },
+ "3000004": {
+  "name": "蝴蝶精",
+  "level": 30,
+  "hp": 800,
+  "exp": 120,
+  "speed": 10,
+  "pad": 80,
+  "castsToKill": 1
+ },
+ "3210800": {
+  "name": "猴子",
+  "level": 37,
+  "hp": 1500,
+  "exp": 77,
+  "speed": 25,
+  "pad": 110,
+  "castsToKill": 1
+ },
+ "5130101": {
+  "name": "石头人",
+  "level": 55,
+  "hp": 4000,
+  "exp": 170,
+  "speed": -70,
+  "pad": 180,
+  "castsToKill": 2
+ }
+}

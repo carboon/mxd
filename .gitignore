@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 视频（体积大，不入库）
+*.mp4
+videos/
+
+# 日志与运行时产物
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
