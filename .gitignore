@@ -9,9 +9,8 @@ __pycache__/
 .venv/
 venv/
 
-# 视频（体积大，不入库）
-*.mp4
-videos/
+# 仅忽略根目录大视频，videos/ 目录允许提交
+/*.mp4
 
 # 日志与运行时产物
 logs/
