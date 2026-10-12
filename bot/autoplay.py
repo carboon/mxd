@@ -545,7 +545,7 @@ class Bot:
                 else:
                     self.send(left=(toward < 0), right=(toward > 0), attack=True)
                     self.logline(f"开火 #{self.attack_count} 目标{t['name']} dist={dist:.0f}")
-                self.next_attack_at = now + random.uniform(0.55, 0.85)
+                self.next_attack_at = now + random.uniform(0.42, 0.68)
         elif self.edge_gap(bb["px"], t) < COMFORT_EDGE:
             # 贴脸(怪精灵边缘<40px): 非攻击帧先拉开, 不贴着大怪丢镖(用户规则1)
             away = -toward

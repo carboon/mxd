@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Combat: star projectiles + hit detection; floating numbers & notices."""
-import math
 import random
 
 import pygame
@@ -10,7 +9,9 @@ from . import sprites
 
 
 class Star:
-    """双飞斩飞镖: 发射时已锁定目标, 直线弹道(vy为倾斜速度), 不追踪。"""
+    """双飞斩飞镖: 发射时已锁定目标, 直线弹道(vy为倾斜速度), 不追踪。
+
+    原版规格: 命中即消失, 不穿透(一镖一怪)。"""
 
     def __init__(self, x, y, face, vy=0.0):
         self.x = x
@@ -36,14 +37,11 @@ class Star:
     def draw(self, surface, cam_x, cam_y):
         img = sprites.load_fx().get("star")
         if img is None:
-            pygame.draw.circle(surface, (255, 120, 160),
+            pygame.draw.circle(surface, (30, 30, 34),
                                (int(self.x - cam_x), int(self.y - cam_y)), 5)
             return
-        img2 = pygame.transform.flip(img, self.face == 1, False)
-        # 倾斜弹道: 镖身随飞行方向旋转(屏幕y向下, 取负角)
-        ang = math.degrees(math.atan2(self.vy, self.face * C.STAR_SPEED))
-        if abs(ang) > 0.5:
-            img2 = pygame.transform.rotate(img2, -ang)
+        # 四角镖随飞行旋转(经典投掷感), 不随弹道倾斜
+        img2 = pygame.transform.rotate(img, (self.t * 540) % 360)
         surface.blit(img2, (int(self.x - cam_x - img2.get_width() / 2),
                             int(self.y - cam_y - img2.get_height() / 2)))
 

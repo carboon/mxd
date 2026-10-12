@@ -41,7 +41,7 @@ L7_BAND_HALF = 28           # 搜索波段初始半高(px)
 L7_SLOPE_DEN = 4            # 波段边界扩宽斜率 1:4
 L7_REACH_UP = 124           # 脚上方最大垂直可达(px)
 L7_REACH_DOWN = 68          # 脚下方最大垂直可达(px)
-ATTACK_COOLDOWN = 0.60      # 攻击间隔（动画周期）
+ATTACK_COOLDOWN = 0.38      # 攻击间隔(原版飞镖可连发, 仅受攻速限制)
 L7_MP_COST = 0              # MP无限模式(需求变更): 双飞斩不耗魔
 PLAYER_MAX_HP, PLAYER_HP = 1822, 1284
 PLAYER_MAX_MP, PLAYER_MP = 1615, 1247
@@ -58,8 +58,8 @@ PUNCH_COOLDOWN = 0.5
 
 # --- 触碰MISS ---------------------------------------------------------------
 # 被怪物触碰时按概率MISS: 不掉血/不击退/不硬直, 头顶漂浮"MISS"(录屏同款), 可自由行动
-PLAYER_MISS_RATE = float(os.environ.get("MXD_MISS_RATE", "0.5"))
-TOUCH_CD = 1.0              # 每只怪两次触碰判定间隔(MISS后防刷屏)
+PLAYER_MISS_RATE = float(os.environ.get("MXD_MISS_RATE", "0.2"))
+TOUCH_CD = 0.6              # 每只怪两次触碰判定间隔(MISS后防刷屏)
 
 # --- 轻功(Haste, A键) --------------------------------------------------------
 # 原版盗贼2转 Lv20 数据: 持续180秒; 本作取游戏世界上限状态(满速140%/满跳120%)
