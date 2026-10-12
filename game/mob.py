@@ -53,7 +53,8 @@ class Mob:
     def take_hit(self, dmg, from_x, fx):
         if self.die_t >= 0:
             return
-        self.hp -= dmg
+        applied = min(dmg, max(self.hp, 0))     # 结算不超剩余血量(双飞斩第二发只补刀差值)
+        self.hp -= applied
         self.state = "hit"
         self.hit_t = 0.32
         self.stun_t = 0.3
@@ -61,7 +62,7 @@ class Mob:
         self.show_hp_t = 4.0
         self.face = -1 if from_x < self.x else 1
         self.x += (18 if from_x < self.x else -18)   # 击退
-        fx.damage_number(self.x, self.y - 55, str(dmg))
+        fx.damage_number(self.x, self.y - 55, str(applied))
         if self.hp <= 0:
             self.state = "die"
             self.die_t = 0.0

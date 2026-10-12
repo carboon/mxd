@@ -89,4 +89,17 @@ allok &= (touch is True)
 print(f"{'✓' if touch else '✗✗✗'} 触碰: 二层玩家(430,26) vs 三层石头人(400,123) 碰撞={touch} 预期=True")
 
 print("全部通过" if allok else "存在失败")
+
+# --- 双飞斩伤害结算不超血量: 猴子1500吃两发1000 → 1000+500, 总额=1500 ---
+print("--- 伤害结算回归 ---")
+monkey = Mob(world, {"mobId": 3210800, "x": 0, "y": 0}, 3210800, skins)
+nums = []
+monkey.take_hit(1000, 0.0, type("FX", (), {"damage_number": staticmethod(lambda x, y, s: nums.append(int(s))),
+                                           "miss_float": staticmethod(lambda *a: None)})())
+monkey.take_hit(1000, 0.0, type("FX", (), {"damage_number": staticmethod(lambda x, y, s: nums.append(int(s))),
+                                           "miss_float": staticmethod(lambda *a: None)})())
+ok3 = (nums == [1000, 500] and monkey.state == "die")
+allok &= ok3
+print(f"{'✓' if ok3 else '✗✗✗'} 猴子两发结算={nums} (预期[1000, 500]), 总额{sum(nums)}==max_hp{monkey.max_hp}")
+
 sys.exit(0 if allok else 1)
