@@ -33,7 +33,12 @@ from bt import Act, Cond, FAILURE, RUNNING, Selector, Sequence, SUCCESS
 
 VISION = "/tmp/mxd_vision.json"
 JUMP_REACH = 115                    # 跳跃高~111px(轻功)
-SAFE_DIST = 75                      # 近身安全线: 挥拳判定55px + 身位余量
+MOB_BODY_W = {"石头人": 140, "蓝蘑菇": 52, "蝴蝶精": 40, "猴子": 46}
+PLAYER_HALF_W = 17                  # 玩家碰撞半宽(34/2): 距离判断按精灵边缘
+MAX_ENGAGE = 380                    # 目标中心距上限: 太远/屏幕边缘外不考虑
+NEAR_EDGE = 45                      # 贴身: 怪精灵边缘<45px(按体型, 大怪提前触发)
+COMFORT_EDGE = 40                   # 战斗保持的身侧间隙: 贴脸先拉开再丢镖
+CLEAR_EDGE = 90                     # 后撤完成线: 最近怪边缘≥90px 才resume攻击
 TIE_DIST = 60                       # 规则2 "距离相当" 判定带宽
 MOB_BODY_H = {"石头人": 120, "蓝蘑菇": 48, "蝴蝶精": 50, "猴子": 46}
 # 与 data/mobs.json body_h 一致(石头人体积大: 二层可打其头, 其头也会顶到二层)
@@ -74,6 +79,7 @@ class Bot:
         self._skill_until = 0.0
         # 受击脱离(规则3)
         self._dis_until = 0.0
+        self._dis_cap = 0.0                 # 后撤硬顶上限(被围时顶伤穿过)
         self._dis_d = 1
         self.next_dis_at = 0.0
         self._dismount_until = 0.0          # 绳底脱离保障期
@@ -109,8 +115,8 @@ class Bot:
     # ---- 行为树 ------------------------------------------------------------
     def _build_tree(self):
         self.tree = Selector([
-            # 1) 受击/被围 → 跳跃后撤(进行中优先; 触发带冷却)
-            Sequence([Cond(lambda bb: bb["now"] < self._dis_until),
+            # 1) 受击/被围 → 往怪少方向后撤(撤到安全边缘为止; 触发带冷却)
+            Sequence([Cond(self.still_disengaging),
                       Act(self.disengage_leaf)]),
             Sequence([Cond(self.need_disengage), Act(self.start_disengage)]),
             # 2) 换站赶路
@@ -170,10 +176,14 @@ class Bot:
             bb["world_ok"] = False
         bb["cur"] = self.layer_of(bb["py"]) if bb["world_ok"] else None
         bb["near_mobs"] = [m for m in bb["mobs"]
-                           if abs(m["y"] - bb["py"]) < 60 and abs(m["x"] - bb["px"]) < 90]
+                           if abs(m["y"] - bb["py"]) < 60
+                           and self.edge_gap(bb["px"], m) < NEAR_EDGE]
         return bb
 
     # ---- 几何/地图 ----------------------------------------------------------
+    def edge_gap(self, px, m):
+        """玩家到怪精灵边缘的水平间距 = 中心距 - 怪半宽 - 自身半宽(用户规则1)。"""
+        return abs(m["x"] - px) - MOB_BODY_W.get(m.get("name", ""), 44) / 2 - PLAYER_HALF_W
     def layer_of(self, y):
         best, bd = None, 1e9
         for i, rep in enumerate(getattr(self, "layer_rep", [])):
@@ -430,26 +440,51 @@ class Bot:
         self.do_transit(bb["px"], bb["py"], cur)
         return RUNNING
 
-    # ---- BT 叶子: 受击脱离(规则3) ----------------------------------------------
+    # ---- BT 叶子: 受击脱离(规则3/4) ----------------------------------------------
     def need_disengage(self, bb):
         if bb["now"] < self.next_dis_at:
             return False
-        return bb["hit_streak"] >= 2 or len(bb["near_mobs"]) >= 3
+        # 规则3: 发生碰撞(掉血)就拉开重新找位; 被围同样触发
+        return bb["hit_streak"] >= 1 or len(bb["near_mobs"]) >= 3
 
     def start_disengage(self, bb):
         near = bb["near_mobs"]
-        cx = sum(m["x"] for m in near) / len(near) if near else bb["px"]
-        d = -1 if cx > bb["px"] else 1
+        # 规则3/4: 以自身为中心小范围统计, 往怪少的一侧撤; 两边一样多→背离最近怪
+        # 垂直窗口110px: 含脚下一层的石头人(头顶会顶到本层, 横向移出其身位范围)
+        win = [m for m in bb["mobs"]
+               if abs(m["x"] - bb["px"]) < 170 and abs(m["y"] - bb["py"]) < 110]
+        nl = sum(1 for m in win if m["x"] < bb["px"])
+        nr = len(win) - nl
+        if nl < nr:
+            d = -1
+        elif nr < nl:
+            d = 1
+        elif win:
+            nearest = min(win, key=lambda m: abs(m["x"] - bb["px"]))
+            d = 1 if nearest["x"] < bb["px"] else -1
+        else:
+            d = -(self.face or 1)
         if bb["px"] < -230:                  # 地图边缘: 只能向图内撤
             d = 1
         elif bb["px"] > 1060:
             d = -1
         self._dis_d = d
-        self._dis_until = bb["now"] + 0.55
+        self._dis_until = bb["now"] + 0.55   # 起跳最小时长
+        self._dis_cap = bb["now"] + 2.2      # 硬顶上限: 两边都有怪时顶伤穿过(规则4)
         self.next_dis_at = bb["now"] + 2.5
-        self.logline(f"受击/被围x{len(near)} → 跳跃后撤向{'右' if self._dis_d > 0 else '左'} "
-                     f"(拉到挥拳距离外)")
+        self.logline(f"受击/被围x{len(near)} → 后撤向{'右' if d > 0 else '左'} "
+                     f"(左{nl}怪/右{nr}怪, 拉到边缘{CLEAR_EDGE}px外)")
         return SUCCESS
+
+    def still_disengaging(self, bb):
+        """规则3: 撤到最近怪边缘≥CLEAR_EDGE(可安心丢镖)为止, 期间方向不变(硬顶)。"""
+        if bb["now"] >= self._dis_cap:
+            return False
+        if bb["now"] < self._dis_until:
+            return True
+        gap = min((self.edge_gap(bb["px"], m) for m in bb["mobs"]
+                   if abs(m["y"] - bb["py"]) < 110), default=1e9)
+        return gap < CLEAR_EDGE
 
     def disengage_leaf(self, bb):
         d = self._dis_d
@@ -459,12 +494,14 @@ class Bot:
     # ---- BT 条件: 目标选择(规则1/2) ---------------------------------------------
     def pick_target(self, bb):
         reach = [(abs(m["x"] - bb["px"]), m) for m in bb["mobs"]
-                 if self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))]
+                 if abs(m["x"] - bb["px"]) <= MAX_ENGAGE
+                 and self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))]
         if not reach:
-            # 2s持久性: 视觉抖动时沿用上个目标(位置用最后已知值)
+            # 0.5s持久性: 仅桥接丢帧; 更久说明目标已丢失/被遮挡, 不朝幽灵丢镖
             if self.target and bb["now"] < self.target_until:
                 t = self.target
-                if self.star_envelope(bb["px"], bb["py"], t["x"], t["y"], t.get("name", "")):
+                if (abs(t["x"] - bb["px"]) <= MAX_ENGAGE
+                        and self.star_envelope(bb["px"], bb["py"], t["x"], t["y"], t.get("name", ""))):
                     bb["target"], bb["target_dist"] = t, abs(t["x"] - bb["px"])
                     return True
             return False
@@ -492,26 +529,31 @@ class Bot:
     def combat_leaf(self, bb):
         t, now, dist = bb["target"], bb["now"], bb["target_dist"]
         toward = 1 if t["x"] - bb["px"] > 0 else -1
-        self.target, self.target_until = t, now + 2.0
+        self.target, self.target_until = t, now + 0.5
         if now >= self.next_attack_at:
-            # 攻击帧: 朝向键+攻击同帧发(游戏在攻击帧用方向键定朝向), 位移≈2px可忽略
-            self.face = toward
-            self.attack_count += 1
-            if self.attack_count % self.jump_star_at == 0 and random.random() < 0.8:
-                self.send(left=(toward < 0), right=(toward > 0), jump=True)
-                threading.Timer(0.09, lambda: self.send(attack=True)).start()
-                self.logline(f"跳标! 目标{t['name']} dist={dist:.0f}")
+            if self.edge_gap(bb["px"], t) < COMFORT_EDGE:
+                # 贴脸(怪精灵边缘<40px)不丢镖, 攻击帧也先拉开(用户规则1)
+                self.next_attack_at = now + 0.15
             else:
-                self.send(left=(toward < 0), right=(toward > 0), attack=True)
-                self.logline(f"开火 #{self.attack_count} 目标{t['name']} dist={dist:.0f}")
-            self.next_attack_at = now + random.uniform(0.55, 0.85)
-        elif dist < SAFE_DIST:
+                # 攻击帧: 朝向键+攻击同帧发(游戏在攻击帧用方向键定朝向), 位移≈2px可忽略
+                self.face = toward
+                self.attack_count += 1
+                if self.attack_count % self.jump_star_at == 0 and random.random() < 0.8:
+                    self.send(left=(toward < 0), right=(toward > 0), jump=True)
+                    threading.Timer(0.09, lambda: self.send(attack=True)).start()
+                    self.logline(f"跳标! 目标{t['name']} dist={dist:.0f}")
+                else:
+                    self.send(left=(toward < 0), right=(toward > 0), attack=True)
+                    self.logline(f"开火 #{self.attack_count} 目标{t['name']} dist={dist:.0f}")
+                self.next_attack_at = now + random.uniform(0.55, 0.85)
+        elif self.edge_gap(bb["px"], t) < COMFORT_EDGE:
+            # 贴脸(怪精灵边缘<40px): 非攻击帧先拉开, 不贴着大怪丢镖(用户规则1)
             away = -toward
             if bb["px"] < -230:              # 地图边缘: 只能向图内拉开
                 away = 1
             elif bb["px"] > 1060:
                 away = -1
-            self.send(left=(away < 0), right=(away > 0))    # 非攻击帧拉开, 防相撞
+            self.send(left=(away < 0), right=(away > 0))
         else:
             self.send()
         return RUNNING
@@ -519,7 +561,8 @@ class Bot:
     # ---- BT 叶子: 换站巡逻(规则4/5) ---------------------------------------------
     def coverage(self, px, py, mobs):
         """从(px,py)站位按双飞斩楔形可锁定的怪数(规则5: 站二层远端覆盖一/三层)。"""
-        return sum(1 for m in mobs if self.star_envelope(px, py, m["x"], m["y"]))
+        return sum(1 for m in mobs
+                   if self.star_envelope(px, py, m["x"], m["y"], m.get("name", "")))
 
     def station_expired(self, bb):
         if bb["cur"] not in (self.L_SECOND, self.L_GROUND):

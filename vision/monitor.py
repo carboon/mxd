@@ -110,9 +110,8 @@ def main():
 
         # 受击判定: HP条下跌 或 玩家附近伤害数字
         hit_now = False
+        # 只认HP下降=玩家真的被打(屏幕伤害数字含bot自己打怪跳出的数字/MISS, 会假触发)
         if last_hp is not None and hp_ratio < last_hp - 0.02:
-            hit_now = True
-        if fx["damage_number"] and player:
             hit_now = True
         if hit_now:
             hit_time = now
