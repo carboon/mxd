@@ -46,6 +46,15 @@ class Player:
     def busy_attack(self):
         return 0 <= self.attack_t < 0.45
 
+    def _takeoff_vx(self, left, right):
+        """起跳瞬间锁定水平动量(空中只能在动量基础上有限操控)。"""
+        s = self.speed()
+        if left and not right:
+            return -s
+        if right and not left:
+            return s
+        return 0.0
+
     def speed(self):
         """当前移动速度(轻功满速140%)。"""
         return C.WALK_SPEED * (C.HASTE_SPEED_MULT if self.haste_t > 0 else 1.0)
@@ -145,11 +154,14 @@ class Player:
             if jump_press:
                 self.climb = None
                 self.vy = self.jump_v() * 0.85
+                self.vx = self._takeoff_vx(left, right)
                 self.on_ground = False
                 self.state = "jump"
                 self.fh_id = None
             if down and self.y >= rope["y2"] - 0.5:
                 self.climb = None
+                self.vy = 0
+                self.vx = self._takeoff_vx(left, right)
                 self.on_ground = False
                 self.state = "jump"
                 self.fh_id = None
@@ -160,8 +172,8 @@ class Player:
         if self.kb_t > 0:
             self.kb_t -= dt
             self.x += self.vx * dt
-        else:
-            # 击退硬直(0.28s)结束后即可自由行动(无敌闪烁不再锁操作, 同原版)
+        elif self.on_ground:
+            self.vx = 0.0
             if left and not right:
                 self.x -= speed * dt
                 if not self.busy_attack():
@@ -170,6 +182,17 @@ class Player:
                 self.x += speed * dt
                 if not self.busy_attack():
                     self.face = 1
+        else:
+            # 空中: 保留起跳水平动量, 操控加速度受限(经典版无法空中全速反向回原地)
+            if left and not right:
+                self.vx = max(-speed, self.vx - C.AIR_ACCEL * dt)
+                if not self.busy_attack():
+                    self.face = -1
+            elif right and not left:
+                self.vx = min(speed, self.vx + C.AIR_ACCEL * dt)
+                if not self.busy_attack():
+                    self.face = 1
+            self.x += self.vx * dt
         self.x = max(self.world.meta["cameraBounds"]["left"] + 12,
                      min(self.world.meta["cameraBounds"]["right"] + C.VIEW_W - 12, self.x))
 
@@ -187,12 +210,14 @@ class Player:
                 else:
                     self.on_ground = False
                     self.vy = 0
+                    self.vx = self._takeoff_vx(left, right)
                     self.state = "jump"
                     self.fh_id = None
             if gy is not None:
                 self.y = gy
             if jump_press and not down and self.kb_t <= 0:
                 self.vy = self.jump_v()
+                self.vx = self._takeoff_vx(left, right)
                 self.on_ground = False
                 self.state = "jump"
                 self.fh_id = None
@@ -202,6 +227,7 @@ class Player:
                     self.drop_fh = self.fh_id
                     self.on_ground = False
                     self.vy = C.DOWNJUMP_V
+                    self.vx = self._takeoff_vx(left, right)
                     self.state = "jump"
                     self.drop_t = 0.26
                     self.fh_id = None

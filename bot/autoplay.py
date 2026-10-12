@@ -35,6 +35,8 @@ VISION = "/tmp/mxd_vision.json"
 JUMP_REACH = 115                    # 跳跃高~111px(轻功)
 SAFE_DIST = 75                      # 近身安全线: 挥拳判定55px + 身位余量
 TIE_DIST = 60                       # 规则2 "距离相当" 判定带宽
+MOB_BODY_H = {"石头人": 120, "蓝蘑菇": 48, "蝴蝶精": 50, "猴子": 46}
+# 与 data/mobs.json body_h 一致(石头人体积大: 二层可打其头, 其头也会顶到二层)
 
 
 def load_map():
@@ -83,6 +85,7 @@ class Bot:
         self.hop_cd = 0.0
         self._drop_tries = 0
         self._stale_since = 0.0             # 本站无包络内目标的起始时刻
+        self.clear_dir = 0                  # 方向坚持: +1/-1(清完一边再换边)
         self.station_since = time.time()    # 驻留轮换: 在站时长
         self.station_budget = random.uniform(12, 20)
         self._last_view_log = 0.0
@@ -186,11 +189,11 @@ class Bot:
                 return r
         return None
 
-    def star_envelope(self, px, py, mx, my):
+    def star_envelope(self, px, py, mx, my, name=""):
         """目标是否在双飞斩搜索楔形内(镜像 combat._l7_target 经典客户端规格)。
 
         身前65~465px; 波段边界1:4扩宽, 垂直封顶脚上124/脚下68;
-        相邻下层只露头可打(远端), 相邻上层远端可打, 跨两层够不到(规则1/5)。
+        怪身体按类型实际高度(石头人120: 二层可打三层石头人的头)。
         """
         dx = abs(mx - px)
         if dx < L7_SEARCH_START or dx > L7_SEARCH_START + L7_RANGE:
@@ -198,7 +201,7 @@ class Bot:
         grow = (dx - L7_SEARCH_START) / L7_SLOPE_DEN
         up = min(L7_BAND_HALF + grow, L7_REACH_UP)
         down = min(L7_BAND_HALF + grow, L7_REACH_DOWN)
-        rel_t = (my - 44) - py               # 怪身顶(相对脚)
+        rel_t = (my - MOB_BODY_H.get(name, 44)) - py      # 怪身顶(相对脚)
         rel_b = my - py
         return rel_b >= -up and rel_t <= down
 
@@ -456,20 +459,31 @@ class Bot:
     # ---- BT 条件: 目标选择(规则1/2) ---------------------------------------------
     def pick_target(self, bb):
         reach = [(abs(m["x"] - bb["px"]), m) for m in bb["mobs"]
-                 if self.star_envelope(bb["px"], bb["py"], m["x"], m["y"])]
+                 if self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))]
         if not reach:
             # 2s持久性: 视觉抖动时沿用上个目标(位置用最后已知值)
             if self.target and bb["now"] < self.target_until:
                 t = self.target
-                if self.star_envelope(bb["px"], bb["py"], t["x"], t["y"]):
+                if self.star_envelope(bb["px"], bb["py"], t["x"], t["y"], t.get("name", "")):
                     bb["target"], bb["target_dist"] = t, abs(t["x"] - bb["px"])
                     return True
             return False
         reach.sort(key=lambda p: p[0])
-        base = reach[0][0]
-        tied = [m for d, m in reach if d - base <= TIE_DIST]
+
+        # 方向坚持: 不被攻击时往一个方向清完可打的怪, 清空该方向才换边(用户规则1)
+        def side(m):
+            return 1 if m["x"] >= bb["px"] else -1
+        if self.clear_dir not in (-1, 1):
+            self.clear_dir = side(reach[0][1])
+        same = [(d, m) for d, m in reach if side(m) == self.clear_dir]
+        if not same:
+            self.clear_dir = -self.clear_dir
+            same = [(d, m) for d, m in reach if side(m) == self.clear_dir]
+
+        base = same[0][0]
+        tied = [m for d, m in same if d - base <= TIE_DIST]
         golems = [m for m in tied if m.get("name") == "石头人"]
-        bb["target"] = golems[0] if golems else reach[0][1]
+        bb["target"] = golems[0] if golems else same[0][1]
         bb["target_dist"] = abs(bb["target"]["x"] - bb["px"])
         self._stale_since = 0.0
         return True
@@ -508,8 +522,13 @@ class Bot:
         return sum(1 for m in mobs if self.star_envelope(px, py, m["x"], m["y"]))
 
     def station_expired(self, bb):
-        return (bb["cur"] in (self.L_SECOND, self.L_GROUND)
-                and bb["now"] - self.station_since > self.station_budget)
+        if bb["cur"] not in (self.L_SECOND, self.L_GROUND):
+            return False
+        if bb["now"] - self.station_since <= self.station_budget:
+            return False
+        # 用户规则1: 只在没有任何可打目标时才换站(往一个方向清完为止)
+        return not any(self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))
+                       for m in bb["mobs"])
 
     def rotate_station(self, bb):
         cur = bb["cur"]

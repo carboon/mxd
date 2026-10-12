@@ -17,6 +17,7 @@ GRAVITY = 2000.0
 JUMP_V = -555.0
 MAX_FALL = 670.0
 WALK_SPEED = 140.0
+AIR_ACCEL = 300.0            # 空中方向操控加速度: 动量保留, 无法全速反向回到起跳点
 CLIMB_SPEED = 100.0
 DOWNJUMP_V = -170.0
 KNOCKBACK_V = 160.0

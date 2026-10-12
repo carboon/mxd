@@ -6,7 +6,9 @@
   "exp": 32,
   "speed": 5,
   "pad": 90,
-  "castsToKill": 1
+  "castsToKill": 1,
+  "body_w": 52,
+  "body_h": 48
  },
  "3000004": {
   "name": "蝴蝶精",
@@ -15,7 +17,9 @@
   "exp": 120,
   "speed": 10,
   "pad": 80,
-  "castsToKill": 1
+  "castsToKill": 1,
+  "body_w": 40,
+  "body_h": 50
  },
  "3210800": {
   "name": "猴子",
@@ -24,7 +28,9 @@
   "exp": 77,
   "speed": 25,
   "pad": 110,
-  "castsToKill": 1
+  "castsToKill": 1,
+  "body_w": 46,
+  "body_h": 46
  },
  "5130101": {
   "name": "石头人",
@@ -33,6 +39,8 @@
   "exp": 170,
   "speed": -70,
   "pad": 180,
-  "castsToKill": 2
+  "castsToKill": 2,
+  "body_w": 140,
+  "body_h": 120
  }
 }

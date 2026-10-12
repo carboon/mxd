@@ -24,6 +24,8 @@ class Mob:
         self.mob_id = mob_id
         st = MOB_STATS[str(mob_id)]
         self.name = st["name"]
+        self.body_w = st.get("body_w", 44)
+        self.body_h = st.get("body_h", 44)
         self.max_hp = st["hp"]
         self.hp = st["hp"]
         self.exp = st["exp"]
@@ -45,8 +47,8 @@ class Mob:
         self.fly = (mob_id == 3000004)
 
     def rect(self):
-        w, h = 44, 44
-        return pygame.Rect(self.x - w / 2, self.y - h, w, h)
+        return pygame.Rect(self.x - self.body_w / 2, self.y - self.body_h,
+                           self.body_w, self.body_h)
 
     def take_hit(self, dmg, from_x, fx):
         if self.die_t >= 0:
