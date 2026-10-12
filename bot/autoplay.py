@@ -37,8 +37,8 @@ MOB_BODY_W = {"石头人": 140, "蓝蘑菇": 52, "蝴蝶精": 40, "猴子": 46}
 PLAYER_HALF_W = 17                  # 玩家碰撞半宽(34/2): 距离判断按精灵边缘
 MAX_ENGAGE = 380                    # 目标中心距上限: 太远/屏幕边缘外不考虑
 NEAR_EDGE = 45                      # 贴身: 怪精灵边缘<45px(按体型, 大怪提前触发)
-COMFORT_EDGE = 40                   # 战斗保持的身侧间隙: 贴脸先拉开再丢镖
-CLEAR_EDGE = 90                     # 后撤完成线: 最近怪边缘≥90px 才resume攻击
+COMFORT_EDGE = 40                   # 战斗保持的身侧间隙基准(小怪); 大怪按体型放大
+                                    # 后撤完成线 = 各怪舒适间隙+50px(石头人138/小怪90)
 TIE_DIST = 60                       # 规则2 "距离相当" 判定带宽
 MOB_BODY_H = {"石头人": 120, "蓝蘑菇": 48, "蝴蝶精": 50, "猴子": 46}
 # 与 data/mobs.json body_h 一致(石头人体积大: 二层可打其头, 其头也会顶到二层)
@@ -184,6 +184,10 @@ class Bot:
     def edge_gap(self, px, m):
         """玩家到怪精灵边缘的水平间距 = 中心距 - 怪半宽 - 自身半宽(用户规则1)。"""
         return abs(m["x"] - px) - MOB_BODY_W.get(m.get("name", ""), 44) / 2 - PLAYER_HALF_W
+
+    def mob_comfort(self, m):
+        """与该怪保持的舒适边缘间隙: 体型越大让得越开(石头人88px, 小怪40px)。"""
+        return COMFORT_EDGE + max(0, MOB_BODY_W.get(m.get("name", ""), 44) - 44) * 0.5
     def layer_of(self, y):
         best, bd = None, 1e9
         for i, rep in enumerate(getattr(self, "layer_rep", [])):
@@ -449,21 +453,30 @@ class Bot:
 
     def start_disengage(self, bb):
         near = bb["near_mobs"]
-        # 规则3/4: 以自身为中心小范围统计, 往怪少的一侧撤; 两边一样多→背离最近怪
-        # 垂直窗口110px: 含脚下一层的石头人(头顶会顶到本层, 横向移出其身位范围)
-        win = [m for m in bb["mobs"]
-               if abs(m["x"] - bb["px"]) < 170 and abs(m["y"] - bb["py"]) < 110]
-        nl = sum(1 for m in win if m["x"] < bb["px"])
-        nr = len(win) - nl
-        if nl < nr:
+        # 规则3/4: 按两侧"险度"选后撤方向 — 400px内的怪按距离加权统计(越近越险),
+        # 避免往远处的大石头人方向撤; 险度相同→背离最近怪
+        def danger(sign):
+            s = 0.0
+            for m in bb["mobs"]:
+                if abs(m["y"] - bb["py"]) >= 110:
+                    continue
+                d = abs(m["x"] - bb["px"])
+                if d < 400 and (1 if m["x"] >= bb["px"] else -1) == sign:
+                    s += 1.0 - d / 400.0
+            return s
+        dl, dr = danger(-1), danger(1)
+        if dl < dr - 1e-6:
             d = -1
-        elif nr < nl:
+        elif dr < dl - 1e-6:
             d = 1
-        elif win:
-            nearest = min(win, key=lambda m: abs(m["x"] - bb["px"]))
-            d = 1 if nearest["x"] < bb["px"] else -1
         else:
-            d = -(self.face or 1)
+            win = [m for m in bb["mobs"]
+                   if abs(m["x"] - bb["px"]) < 170 and abs(m["y"] - bb["py"]) < 110]
+            if win:
+                nearest = min(win, key=lambda m: abs(m["x"] - bb["px"]))
+                d = 1 if nearest["x"] < bb["px"] else -1
+            else:
+                d = -(self.face or 1)
         if bb["px"] < -230:                  # 地图边缘: 只能向图内撤
             d = 1
         elif bb["px"] > 1060:
@@ -473,18 +486,19 @@ class Bot:
         self._dis_cap = bb["now"] + 2.2      # 硬顶上限: 两边都有怪时顶伤穿过(规则4)
         self.next_dis_at = bb["now"] + 2.5
         self.logline(f"受击/被围x{len(near)} → 后撤向{'右' if d > 0 else '左'} "
-                     f"(左{nl}怪/右{nr}怪, 拉到边缘{CLEAR_EDGE}px外)")
+                     f"(左险{dl:.1f}/右险{dr:.1f}, 拉到安全边缘外)")
         return SUCCESS
 
     def still_disengaging(self, bb):
-        """规则3: 撤到最近怪边缘≥CLEAR_EDGE(可安心丢镖)为止, 期间方向不变(硬顶)。"""
+        """规则3: 撤到每只近处怪都让出(舒适间隙+50px)为止, 期间方向不变(硬顶)。"""
         if bb["now"] >= self._dis_cap:
             return False
         if bb["now"] < self._dis_until:
             return True
-        gap = min((self.edge_gap(bb["px"], m) for m in bb["mobs"]
-                   if abs(m["y"] - bb["py"]) < 110), default=1e9)
-        return gap < CLEAR_EDGE
+        margin = min((self.edge_gap(bb["px"], m) - self.mob_comfort(m)
+                      for m in bb["mobs"]
+                      if abs(m["y"] - bb["py"]) < 110), default=1e9)
+        return margin < 50
 
     def disengage_leaf(self, bb):
         d = self._dis_d
@@ -526,14 +540,32 @@ class Bot:
         return True
 
     # ---- BT 叶子: 战斗(规则1/3) -------------------------------------------------
+    def _step_away(self, bb, m):
+        """从指定怪身边横向拉开一步(地图边缘内向图内让)。"""
+        d = -1 if m["x"] > bb["px"] else 1
+        if bb["px"] < -230:
+            d = 1
+        elif bb["px"] > 1060:
+            d = -1
+        self.send(left=(d < 0), right=(d > 0))
+
     def combat_leaf(self, bb):
         t, now, dist = bb["target"], bb["now"], bb["target_dist"]
         toward = 1 if t["x"] - bb["px"] > 0 else -1
         self.target, self.target_until = t, now + 0.5
+
+        # 任何近身怪(含大石头人)进入其舒适间隙 → 拉开优先于输出(用户反馈:
+        # 不应主动贴近石头人, 边打边让位)
+        crowd = None
+        for m in bb["mobs"]:
+            if abs(m["y"] - bb["py"]) < 110 and self.edge_gap(bb["px"], m) < self.mob_comfort(m):
+                crowd = m
+                break
+
         if now >= self.next_attack_at:
-            if self.edge_gap(bb["px"], t) < COMFORT_EDGE:
-                # 贴脸(怪精灵边缘<40px)不丢镖, 攻击帧也先拉开(用户规则1)
-                self.next_attack_at = now + 0.15
+            if crowd is not None or self.edge_gap(bb["px"], t) < self.mob_comfort(t):
+                self._step_away(bb, crowd if crowd is not None else t)
+                self.next_attack_at = now + 0.12     # 拉开期顺延攻击帧, 不贴脸丢镖
             else:
                 # 攻击帧: 朝向键+攻击同帧发(游戏在攻击帧用方向键定朝向), 位移≈2px可忽略
                 self.face = toward
@@ -546,14 +578,8 @@ class Bot:
                     self.send(left=(toward < 0), right=(toward > 0), attack=True)
                     self.logline(f"开火 #{self.attack_count} 目标{t['name']} dist={dist:.0f}")
                 self.next_attack_at = now + random.uniform(0.42, 0.68)
-        elif self.edge_gap(bb["px"], t) < COMFORT_EDGE:
-            # 贴脸(怪精灵边缘<40px): 非攻击帧先拉开, 不贴着大怪丢镖(用户规则1)
-            away = -toward
-            if bb["px"] < -230:              # 地图边缘: 只能向图内拉开
-                away = 1
-            elif bb["px"] > 1060:
-                away = -1
-            self.send(left=(away < 0), right=(away > 0))
+        elif crowd is not None:
+            self._step_away(bb, crowd)
         else:
             self.send()
         return RUNNING
