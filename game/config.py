@@ -25,13 +25,21 @@ INVINCIBLE_TIME = 2.2
 
 # --- combat ----------------------------------------------------------------
 STAR_DAMAGE = 1000          # 每发飞镖固定伤害（简化规则）
-STAR_COUNT = 2              # 双飞斩一次2发
+STAR_COUNT = 2              # 双飞斩一次2发(经典客户端: 1目标2段伤害)
 STAR_SPEED = 760.0
 STAR_INNER_DELAY = 0.09     # 两发间隔
-# 飞镖扇形覆盖(远端可打中相邻平台的上下目标; 封顶不跨相隔182px的两层)
-STAR_CONE_NEAR = 12         # 近端垂直半高(px)
-STAR_CONE_SLOPE = 0.28      # 垂直半高随飞行距离的扩张斜率
-STAR_CONE_MAX = 130         # 垂直半高封顶(px)
+# --- 经典客户端 Lucky Seven 目标搜索/弹道规格 ---
+# 来源: NiaMeowDB MapleStory Classic 隐藏机制(WZ客户端逆向整理):
+#   发射时步进锁定单一目标(65px起,20px波段,边界按1:4斜率扩宽≈14°),
+#   弹道为直线从出手点飞向目标(打上下平台时倾斜);
+#   垂直可达脚上124px/脚下68px —— 相邻下层只露头可打, 相邻上层远端可打,
+#   跨两层永远够不到(与地图观察一致)
+L7_SEARCH_START = 65        # 目标搜索起点: 身前65px
+L7_RANGE = 400              # 水平索敌距离(65+400=465px处为止)
+L7_BAND_HALF = 28           # 搜索波段初始半高(px)
+L7_SLOPE_DEN = 4            # 波段边界扩宽斜率 1:4
+L7_REACH_UP = 124           # 脚上方最大垂直可达(px)
+L7_REACH_DOWN = 68          # 脚下方最大垂直可达(px)
 ATTACK_COOLDOWN = 0.60      # 攻击间隔（动画周期）
 L7_MP_COST = 0              # MP无限模式(需求变更): 双飞斩不耗魔
 PLAYER_MAX_HP, PLAYER_HP = 1822, 1284

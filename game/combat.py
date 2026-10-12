@@ -10,26 +10,27 @@ from . import sprites
 
 
 class Star:
-    def __init__(self, x, y, face):
+    """双飞斩飞镖: 发射时已锁定目标, 直线弹道(vy为倾斜速度), 不追踪。"""
+
+    def __init__(self, x, y, face, vy=0.0):
         self.x = x
-        self.x0 = x            # 出手点: 扇形覆盖随飞行距离扩张
         self.y = y
         self.face = face
+        self.vy = vy
         self.dead = False
         self.t = 0.0
 
     def update(self, dt, mobs):
         self.t += dt
         self.x += self.face * C.STAR_SPEED * dt
-        half = min(C.STAR_CONE_NEAR + C.STAR_CONE_SLOPE * abs(self.x - self.x0),
-                   C.STAR_CONE_MAX)
-        r = pygame.Rect(self.x - 16, self.y - half, 32, half * 2)
+        self.y += self.vy * dt
+        r = pygame.Rect(self.x - 12, self.y - 12, 24, 24)
         for m in mobs:
             if m.state != "die" and r.colliderect(m.rect()):
                 m.take_hit(C.STAR_DAMAGE, self.x - self.face * 40, global_fx)
                 self.dead = True
                 return
-        if self.t > 1.2 or not (-360 < self.x < 1200):
+        if self.t > 1.2 or not (-360 < self.x < 1200) or not (-400 < self.y < 420):
             self.dead = True
 
     def draw(self, surface, cam_x, cam_y):
@@ -39,6 +40,10 @@ class Star:
                                (int(self.x - cam_x), int(self.y - cam_y)), 5)
             return
         img2 = pygame.transform.flip(img, self.face == 1, False)
+        # 倾斜弹道: 镖身随飞行方向旋转(屏幕y向下, 取负角)
+        ang = math.degrees(math.atan2(self.vy, self.face * C.STAR_SPEED))
+        if abs(ang) > 0.5:
+            img2 = pygame.transform.rotate(img2, -ang)
         surface.blit(img2, (int(self.x - cam_x - img2.get_width() / 2),
                             int(self.y - cam_y - img2.get_height() / 2)))
 
@@ -74,9 +79,40 @@ class Combat:
                               player.y - 34, player.face, 0.0])
         target.take_hit(C.PUNCH_DAMAGE, player.x, global_fx)
 
+    def _l7_target(self, player, spawn_y):
+        """经典客户端 Lucky Seven 目标搜索(步进楔形)。
+
+        从身前65px起按20px波段步进, 波段边界按1:4斜率扩宽,
+        垂直封顶脚上124px/脚下68px; 取最近的可打目标。
+        """
+        best, best_dx = None, None
+        for m in self.mobs_getter():
+            if m.state == "die":
+                continue
+            dxm = (m.x - player.x) * player.face
+            if dxm < C.L7_SEARCH_START or dxm > C.L7_SEARCH_START + C.L7_RANGE:
+                continue
+            grow = (dxm - C.L7_SEARCH_START) / C.L7_SLOPE_DEN
+            up = min(C.L7_BAND_HALF + grow, C.L7_REACH_UP)      # 脚上方
+            down = min(C.L7_BAND_HALF + grow, C.L7_REACH_DOWN)  # 脚下方
+            rect = m.rect()
+            rel_t = rect.top - player.y                          # 怪身顶(相对脚)
+            rel_b = rect.bottom - player.y
+            if rel_b < -up or rel_t > down:                      # 身体与波段无重叠
+                continue
+            if best is None or dxm < best_dx:
+                best, best_dx = m, dxm
+        return best
+
     def throw_star(self, player):
         y = player.y - 38 if player.state != "prone" else player.y - 14
-        self.stars.append(Star(player.x + player.face * 18, y, player.face))
+        vy = 0.0
+        target = self._l7_target(player, y)
+        if target is not None:
+            # 直线弹道: 从出手点穿过目标身体中心(打上下平台时倾斜)
+            dxm = abs(target.x - player.x)
+            vy = ((target.y - 22) - y) / max(dxm, 1.0) * C.STAR_SPEED
+        self.stars.append(Star(player.x + player.face * 18, y, player.face, vy))
         self.stars_fired += 1
 
     def update(self, dt):

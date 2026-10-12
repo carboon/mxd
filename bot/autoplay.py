@@ -9,10 +9,10 @@
   1. 受击/被围脱离(规则3): 跳跃后撤到挥拳距离外, 结束后回到战斗分支
   2. 换站赶路(route 非空): 绳上行(仅地面↔第三层)/顺绳滑下/平台下跳/跳上(规则6)
   3. 战斗(规则1/2): 效用选目标(最近优先; 距离相当优先石头人)
-     → 飞镖包络内(含扇形远端上下, 规则5)直接开火, 不再逼近
+     → 双飞斩楔形内(1:4扩宽,远端上下, 规则5)直接开火, 不再逼近
      → 近身<75px 先拉开(防被迫挥拳/相撞), 攻击帧同帧定朝向
   4. 换站巡逻(规则4/5): 本站可打怪清完 → 效用选下一站台 {第二层, 地面}
-     站第二层时扇形可覆盖第一/三层, 地面只覆盖本层
+     站第二层时楔形远端可覆盖第一/三层, 地面只覆盖本层(经典客户端垂直可达: 脚上124/脚下68)
   5. 待机
 """
 import json
@@ -27,12 +27,12 @@ sys.path.insert(0, R)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from game.ipc import RemoteInputClient
-from game.config import STAR_CONE_MAX, STAR_CONE_NEAR, STAR_CONE_SLOPE
+from game.config import (L7_BAND_HALF, L7_RANGE, L7_REACH_DOWN, L7_REACH_UP,
+                         L7_SEARCH_START, L7_SLOPE_DEN)
 from bt import Act, Cond, FAILURE, RUNNING, Selector, Sequence, SUCCESS
 
 VISION = "/tmp/mxd_vision.json"
 JUMP_REACH = 115                    # 跳跃高~111px(轻功)
-STAR_RANGE = 880                    # 飞镖飞行1.2s*760px/s, 留余量
 SAFE_DIST = 75                      # 近身安全线: 挥拳判定55px + 身位余量
 TIE_DIST = 60                       # 规则2 "距离相当" 判定带宽
 
@@ -187,13 +187,20 @@ class Bot:
         return None
 
     def star_envelope(self, px, py, mx, my):
-        """目标是否在飞镖包络内(镜像 combat.Star 的扇形判定, 规则1/5)。"""
+        """目标是否在双飞斩搜索楔形内(镜像 combat._l7_target 经典客户端规格)。
+
+        身前65~465px; 波段边界1:4扩宽, 垂直封顶脚上124/脚下68;
+        相邻下层只露头可打(远端), 相邻上层远端可打, 跨两层够不到(规则1/5)。
+        """
         dx = abs(mx - px)
-        if dx > STAR_RANGE:
+        if dx < L7_SEARCH_START or dx > L7_SEARCH_START + L7_RANGE:
             return False
-        half = min(STAR_CONE_NEAR + STAR_CONE_SLOPE * dx, STAR_CONE_MAX)
-        star_y = py - 38                       # 出手高度(站立)
-        return (star_y + half >= my - 50) and (star_y - half <= my + 6)
+        grow = (dx - L7_SEARCH_START) / L7_SLOPE_DEN
+        up = min(L7_BAND_HALF + grow, L7_REACH_UP)
+        down = min(L7_BAND_HALF + grow, L7_REACH_DOWN)
+        rel_t = (my - 44) - py               # 怪身顶(相对脚)
+        rel_b = my - py
+        return rel_b >= -up and rel_t <= down
 
     # ---- 导航图 --------------------------------------------------------------
     def _build_nav_graph(self):
@@ -496,10 +503,9 @@ class Bot:
         return RUNNING
 
     # ---- BT 叶子: 换站巡逻(规则4/5) ---------------------------------------------
-    def coverage(self, py, mobs):
-        """从高度 py 站位可打到的怪数: 出手高度±扇形封顶(规则5: 站二层覆盖一/三层)。"""
-        star_y = py - 38
-        return sum(1 for m in mobs if abs(m["y"] - star_y) <= STAR_CONE_MAX + 50)
+    def coverage(self, px, py, mobs):
+        """从(px,py)站位按双飞斩楔形可锁定的怪数(规则5: 站二层远端覆盖一/三层)。"""
+        return sum(1 for m in mobs if self.star_envelope(px, py, m["x"], m["y"]))
 
     def station_expired(self, bb):
         return (bb["cur"] in (self.L_SECOND, self.L_GROUND)
@@ -518,7 +524,7 @@ class Bot:
             self.send()
             return RUNNING
         stations = (self.L_SECOND, self.L_GROUND)
-        cov = {s: self.coverage(self.layer_rep[s], bb["mobs"]) for s in stations}
+        cov = {s: self.coverage(bb["px"], self.layer_rep[s], bb["mobs"]) for s in stations}
         if cur in stations and cov[cur] > 0:
             same = [m for m in bb["mobs"] if self.layer_of(m["y"]) == cur]
             if same:
@@ -532,7 +538,7 @@ class Bot:
                 self._stale_since = now
             if now - self._stale_since < 3.0:
                 self.send()
-                return RUNNING                               # 等邻层怪游进扇形
+                return RUNNING                               # 等邻层怪游进楔形远端
             other = stations[1] if cur == stations[0] else stations[0]
             return self._goto(bb, other, now)                # 等超时 → 换另一站
         best = max(stations, key=lambda s: cov[s])

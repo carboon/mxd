@@ -15,7 +15,7 @@ import time
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, R)
 DURATION = int(sys.argv[1]) if len(sys.argv) > 1 else 90
-FPS = 30
+FPS = 15
 OUT = os.path.join(R, "videos")
 os.makedirs(OUT, exist_ok=True)
 MP4 = os.path.join(OUT, "bot_gameplay.mp4")
@@ -35,7 +35,7 @@ for f in [os.path.join(R, "logs/kill_log.csv"), os.path.join(R, "logs/session_ex
 ffmpeg = subprocess.Popen(
     ["ffmpeg", "-y", "-loglevel", "error",
      "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "1280x724", "-r", str(FPS), "-i", "-",
-     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-crf", "23",
      "-movflags", "+faststart", MP4],
     stdin=subprocess.PIPE)
 
