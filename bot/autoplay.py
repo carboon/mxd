@@ -81,6 +81,7 @@ class Bot:
         self._dis_until = 0.0
         self._dis_cap = 0.0                 # 后撤硬顶上限(被围时顶伤穿过)
         self._dis_d = 1
+        self._snipe_cd = 0.0                # 跳狙冷却(覆盖一次起跳~落地)
         self.next_dis_at = 0.0
         self._dismount_until = 0.0          # 绳底脱离保障期
         # ---- 分层导航 ----
@@ -119,20 +120,26 @@ class Bot:
             Sequence([Cond(self.still_disengaging),
                       Act(self.disengage_leaf)]),
             Sequence([Cond(self.need_disengage), Act(self.start_disengage)]),
-            # 2) 换站赶路
-            Act(self.transit_leaf),
-            # 2.5) 绳底脱离保障期(滑到底后0.7s反复↓+跳, 防吊在绳上)
+            # 2) 绳底脱离保障期(滑到底后0.7s反复↓+跳, 防吊在绳上)
             Sequence([Cond(lambda bb: bb["now"] < self._dismount_until),
                       Act(lambda bb: (self.send(down=True, jump=True), RUNNING)[1])]),
-            # 2.6) 驻留轮换: 在站超时 → 换另一个优选站台(规则4: 两站间巡逻)
+            # 3) 战斗: 有可打目标就地清怪(赶路途中也停下发扫; 绳上除外)
+            Sequence([Cond(self.combat_gate), Cond(self.pick_target), Act(self.combat_leaf)]),
+            # 3.5) 跳狙: 站立打不到、但跳至最高点可覆盖的上层怪 → 跳起施法
+            Sequence([Cond(self.pick_apex_target), Act(self.snipe_leaf)]),
+            # 4) 换站赶路
+            Act(self.transit_leaf),
+            # 5) 驻留轮换: 在站超时且清空 → 换另一个优选站台(规则4)
             Sequence([Cond(self.station_expired), Act(self.rotate_station)]),
-            # 3) 战斗: 选目标(规则2) → 包络内直接开火(规则1)
-            Sequence([Cond(self.pick_target), Act(self.combat_leaf)]),
-            # 4) 本站清完 → 换站巡逻(规则4/5)
+            # 6) 本站清完 → 换站巡逻(规则4/5)
             Act(self.reposition_leaf),
-            # 5) 待机
+            # 7) 待机
             Act(self.idle_leaf),
         ])
+
+    def combat_gate(self, bb):
+        """绳上不开火(攀爬优先); 地面/跳跃中允许边走边清。"""
+        return self.on_rope(bb["px"], bb["py"]) is None
 
     # ---- 视觉输入/黑板 ------------------------------------------------------
     def read_vision(self):
@@ -553,6 +560,9 @@ class Bot:
         t, now, dist = bb["target"], bb["now"], bb["target_dist"]
         toward = 1 if t["x"] - bb["px"] > 0 else -1
         self.target, self.target_until = t, now + 0.5
+        if self.route:                      # 赶路途中开火: 顺延路线时限防超时弃站
+            self.transit_until = max(self.transit_until, now + 6)
+            self.hop_until = max(self.hop_until, now + 6)
 
         # 任何近身怪(含大石头人)进入其舒适间隙 → 拉开优先于输出(用户反馈:
         # 不应主动贴近石头人, 边打边让位)
@@ -584,20 +594,64 @@ class Bot:
             self.send()
         return RUNNING
 
+    # ---- BT 条件/叶子: 跳狙(用户技巧: 跳至最高点施法清上层) ----------------------
+    def pick_apex_target(self, bb):
+        """站立包络打不到、但跳到最高点(脚底抬高~110px)可覆盖的"上层"怪。"""
+        reach = []
+        for m in bb["mobs"]:
+            d = abs(m["x"] - bb["px"])
+            if d > MAX_ENGAGE or m["y"] >= bb["py"] - 40:   # 只狙高于自身的怪
+                continue
+            if (not self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))
+                    and self.star_envelope(bb["px"], bb["py"] - 110, m["x"], m["y"],
+                                           m.get("name", ""))):
+                reach.append((d, m))
+        if not reach:
+            return False
+        reach.sort(key=lambda p: p[0])
+        base = reach[0][0]
+        tied = [m for d, m in reach if d - base <= TIE_DIST]
+        golems = [m for m in tied if m.get("name") == "石头人"]
+        bb["target"] = golems[0] if golems else reach[0][1]
+        bb["target_dist"] = abs(bb["target"]["x"] - bb["px"])
+        return True
+
+    def snipe_leaf(self, bb):
+        t, now = bb["target"], bb["now"]
+        if now < self._snipe_cd:
+            return FAILURE                                  # 空中/冷却中: 交给后续分支
+        toward = 1 if t["x"] - bb["px"] > 0 else -1
+        self._snipe_cd = now + 1.4                          # 覆盖起跳~落地全程
+        self.face = toward
+        # 朝目标起跳, 0.26s后(最高点平台期)施法: 楔形随高度覆盖上层怪
+        self.send(left=(toward < 0), right=(toward > 0), jump=True)
+        threading.Timer(0.26, lambda: self.send(attack=True)).start()
+        self.next_attack_at = now + 0.8
+        if self.route:                                      # 赶路途中狙怪: 顺延路线时限
+            self.transit_until = max(self.transit_until, now + 6)
+            self.hop_until = max(self.hop_until, now + 6)
+        self.logline(f"跳狙! {t['name']} dist={bb['target_dist']:.0f} (最高点施法)")
+        return SUCCESS
+
     # ---- BT 叶子: 换站巡逻(规则4/5) ---------------------------------------------
     def coverage(self, px, py, mobs):
-        """从(px,py)站位按双飞斩楔形可锁定的怪数(规则5: 站二层远端覆盖一/三层)。"""
-        return sum(1 for m in mobs
-                   if self.star_envelope(px, py, m["x"], m["y"], m.get("name", "")))
+        """从(px,py)站位可清的怪数: 站立楔形直打 + 上层怪跳狙覆盖(规则5)。"""
+        n = 0
+        for m in mobs:
+            name = m.get("name", "")
+            if self.star_envelope(px, py, m["x"], m["y"], name):
+                n += 1
+            elif m["y"] < py - 40 and self.star_envelope(px, py - 110, m["x"], m["y"], name):
+                n += 1
+        return n
 
     def station_expired(self, bb):
         if bb["cur"] not in (self.L_SECOND, self.L_GROUND):
             return False
         if bb["now"] - self.station_since <= self.station_budget:
             return False
-        # 用户规则1: 只在没有任何可打目标时才换站(往一个方向清完为止)
-        return not any(self.star_envelope(bb["px"], bb["py"], m["x"], m["y"], m.get("name", ""))
-                       for m in bb["mobs"])
+        # 用户规则1: 站立直打和跳狙可及的怪全部清完才换站
+        return self.coverage(bb["px"], bb["py"], bb["mobs"]) == 0
 
     def rotate_station(self, bb):
         cur = bb["cur"]
