@@ -93,8 +93,7 @@ class Bot:
         self._drop_tries = 0
         self._stale_since = 0.0             # 本站无包络内目标的起始时刻
         self.clear_dir = 0                  # 方向坚持: +1/-1(清完一边再换边)
-        self.station_since = time.time()    # 驻留轮换: 在站时长
-        self.station_budget = random.uniform(12, 20)
+        self.station_since = time.time()    # 驻留: 在站时长(清空+蹲2s后换高覆盖站)
         self._last_view_log = 0.0
         self._world_snap = None
         self._pw_prev = None
@@ -490,14 +489,14 @@ class Bot:
             d = -1
         self._dis_d = d
         self._dis_until = bb["now"] + 0.55   # 起跳最小时长
-        self._dis_cap = bb["now"] + 2.2      # 硬顶上限: 两边都有怪时顶伤穿过(规则4)
-        self.next_dis_at = bb["now"] + 2.5
+        self._dis_cap = bb["now"] + 1.3      # 硬顶上限: 快速归队恢复输出(效率优先)
+        self.next_dis_at = bb["now"] + 2.2
         self.logline(f"受击/被围x{len(near)} → 后撤向{'右' if d > 0 else '左'} "
                      f"(左险{dl:.1f}/右险{dr:.1f}, 拉到安全边缘外)")
         return SUCCESS
 
     def still_disengaging(self, bb):
-        """规则3: 撤到每只近处怪都让出(舒适间隙+50px)为止, 期间方向不变(硬顶)。"""
+        """规则3: 撤到每只近处怪都让出(舒适间隙+40px)为止, 期间方向不变(硬顶)。"""
         if bb["now"] >= self._dis_cap:
             return False
         if bb["now"] < self._dis_until:
@@ -505,7 +504,7 @@ class Bot:
         margin = min((self.edge_gap(bb["px"], m) - self.mob_comfort(m)
                       for m in bb["mobs"]
                       if abs(m["y"] - bb["py"]) < 110), default=1e9)
-        return margin < 50
+        return margin < 40
 
     def disengage_leaf(self, bb):
         d = self._dis_d
@@ -538,6 +537,7 @@ class Bot:
             self.clear_dir = -self.clear_dir
             same = [(d, m) for d, m in reach if side(m) == self.clear_dir]
 
+        # 就近顺手打(用户规则2): 最近优先, 距离相当(TIE_DIST内)优先石头人
         base = same[0][0]
         tied = [m for d, m in same if d - base <= TIE_DIST]
         golems = [m for m in tied if m.get("name") == "石头人"]
@@ -648,16 +648,25 @@ class Bot:
     def station_expired(self, bb):
         if bb["cur"] not in (self.L_SECOND, self.L_GROUND):
             return False
-        if bb["now"] - self.station_since <= self.station_budget:
+        if bb["now"] - self.station_since < 3.0:
+            self._cleared_since = 0.0
             return False
-        # 用户规则1: 站立直打和跳狙可及的怪全部清完才换站
-        return self.coverage(bb["px"], bb["py"], bb["mobs"]) == 0
+        if self.coverage(bb["px"], bb["py"], bb["mobs"]) > 0:
+            self._cleared_since = 0.0
+            return False
+        if not self._cleared_since:
+            self._cleared_since = bb["now"]     # 刚清空: 等2s看原地刷新(蹲点效率)
+            return False
+        return bb["now"] - self._cleared_since >= 2.0
 
     def rotate_station(self, bb):
         cur = bb["cur"]
-        other = self.L_GROUND if cur == self.L_SECOND else self.L_SECOND
+        stations = (self.L_SECOND, self.L_GROUND)
+        cov = {s: self.coverage(bb["px"], self.layer_rep[s], bb["mobs"]) for s in stations}
+        # 去覆盖高的站台(平局去另一站), 不再盲换
+        other = max(stations, key=lambda s: (cov[s], -(s == cur)))
         self.station_since = bb["now"]
-        self.station_budget = random.uniform(12, 20)
+        self._cleared_since = 0.0
         return self._goto(bb, other, bb["now"])
 
     def reposition_leaf(self, bb):
