@@ -18,7 +18,6 @@ from game import config as C
 from game import combat, sprites
 from game.mob import SpawnManager
 from game.player import Player
-from game.pets import make_pets
 from game.stats import Session
 from game.ui import Ui, draw_nameplate, _cn_font
 from game.world import World
@@ -60,7 +59,6 @@ class Game:
             for m, dx in zip(self.spawns.mobs, (-45, -75, 60)):
                 m.x, m.y = self.player.x + dx, 305.0
         self.ui = Ui()
-        self.pets = make_pets()
         self.combat = combat.Combat(lambda: self.spawns.mobs)
         self.fx = combat.global_fx
         self.cam_x, self.cam_y = self.world.clamp_cam(
@@ -126,8 +124,6 @@ class Game:
                 keys = local
             events = set(events) | revents
         self.player.update(dt, keys, events, self.combat, self.session)
-        for p in self.pets:
-            p.update(dt, self.player)
         self.spawns.update(dt, self.player, self.session, self.fx)
         self.combat.update(dt)
         self.fx.update(dt)
@@ -160,9 +156,6 @@ class Game:
         py = self.player.y - self.cam_y
         draw_nameplate(surf, self.plate_font, px, py + 4, C.PLAYER_NAME, "player")
         draw_nameplate(surf, self.badge_font, px, py + 20, C.PLAYER_BADGE, "badge")
-        # 宠物（在玩家身后）
-        for p in self.pets:
-            p.draw(surf, self.cam_x, self.cam_y)
         self.player.draw(surf, self.cam_x, self.cam_y)
         self.combat.draw(surf, self.cam_x, self.cam_y)
         self.fx.draw_texts(surf, self.cam_x, self.cam_y)

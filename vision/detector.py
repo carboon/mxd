@@ -372,8 +372,8 @@ class Detector:
 
     def player_world_from_minimap(self, frame):
         """小地图上的橙色玩家箭头 → 世界坐标(纯视觉)。
-        只搜索画布下半区(y≥48), 排除标题文字与"大地图"橙色按钮。"""
-        y_top = MM_OY + 42
+        全画布搜索(面板图无橙色按钮/文字干扰; 上层平台箭头在画布上部, 不可排除)。"""
+        y_top = MM_OY + 2
         reg = frame[y_top:MM_OY + MM_H, MM_OX:MM_OX + MM_W].astype(np.int16)
         r, g, b = reg[:, :, 0], reg[:, :, 1], reg[:, :, 2]
         # 箭头是ui.py绘制的纯色(255,170,40)三角, 画布无同色 → 精确掩码唯一
@@ -383,10 +383,17 @@ class Detector:
         for i, sl in enumerate(ndimage.find_objects(lab), 1):
             comp = (lab[sl] == i)
             px = int(comp.sum())
-            if px < 2:
+            if px < 5 or px > 60:                       # 箭头约16px(7x4三角); 剔除大按钮/大杂块
+                continue
+            bh, bw = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
+            if bw > 10 or bh > 8:                       # 文字碎片通常细长
+                continue
+            if not ndimage.binary_erosion(comp).any():  # 细线(边缘抗锯齿)无内部像素
                 continue
             pix = reg[sl][comp].astype(np.float32)
             sat = float((pix[:, 0] - pix[:, 2]).mean())    # 橙箭头 r-b≈215, 干扰更低
+            if sat < 120:
+                continue
             score = sat * min(px, 30)
             if score > bscore:
                 bscore = score

@@ -106,11 +106,9 @@ class RemoteInputServer:
         self.last_seq = 0
 
     def read(self):
-        """返回 (keys_dict, events_set)。按seq消费一次(客户端seq最后写, 无需清除)。"""
+        """返回 (keys_dict, events_set)。
+        按住键每帧都生效(等同真实键盘按住); 边缘事件仅在seq变化的那一帧消费一次。"""
         seq = self.buf[0]
-        if seq == self.last_seq:
-            return None, set()
-        self.last_seq = seq
         kb = self.buf[1]
         edges = self.buf[2]
         keys = {
@@ -118,12 +116,14 @@ class RemoteInputServer:
             "up": bool(kb & KEY_U), "down": bool(kb & KEY_D),
         }
         events = set()
-        if edges & EDGE_ATTACK:
-            events.add("attack")
-        if edges & EDGE_JUMP:
-            events.add("jump")
-        if edges & EDGE_SKILL:
-            events.add("skill")
+        if seq != self.last_seq:
+            self.last_seq = seq
+            if edges & EDGE_ATTACK:
+                events.add("attack")
+            if edges & EDGE_JUMP:
+                events.add("jump")
+            if edges & EDGE_SKILL:
+                events.add("skill")
         return keys, events
 
     def close(self):
